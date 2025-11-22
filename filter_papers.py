@@ -8,6 +8,7 @@ import re
 import yaml
 import json
 import argparse
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -22,7 +23,7 @@ class PaperFilter:
         self.options = self.config.get('options', {})
         self.case_sensitive = self.options.get('case_sensitive', False)
         self.min_keyword_matches = self.options.get('min_keyword_matches', 1)
-        self.output_dir = self.options.get('output_dir', 'filtered')
+        self.output_dir = self.options.get('output_dir', '_filtered')
 
         # Map conference names to directory names
         self.conference_map = {
@@ -213,58 +214,89 @@ class PaperFilter:
             output.append(f"- {conf_year}: {count} papers\n")
         output.append("\n---\n\n")
 
-        # Papers by Conference
-        output.append("## Papers by Conference\n\n")
-
-        current_conf_year = None
-        paper_num = 1
-
+        # Group papers by conference/year
+        conf_groups = {}
         for paper in papers:
             conf_year = f"{paper['conference']} {paper['year']}"
+            if conf_year not in conf_groups:
+                conf_groups[conf_year] = []
+            conf_groups[conf_year].append(paper)
 
-            if conf_year != current_conf_year:
-                current_conf_year = conf_year
-                count = stats['by_conference'][conf_year]
-                output.append(f"### {conf_year} ({count} papers)\n\n")
+        # Sort papers within each conference by priority (HIGH > MED > LOW)
+        def get_priority_score(paper):
+            if paper['match_count'] >= 3 or (paper.get('rating') and 'Top-5' in paper.get('rating', '')):
+                return 3  # HIGH
+            elif paper['match_count'] >= 2 or (paper.get('rating') and 'Top' in paper.get('rating', '')):
+                return 2  # MED
+            else:
+                return 1  # LOW
 
-            output.append(f"#### {paper_num}. {paper['title']}\n\n")
+        # Papers by Conference
+        output.append("## Papers by Conference\n\n")
+        output.append("_Papers within each conference are sorted by priority (HIGH → MED → LOW)_\n\n")
 
-            if paper['authors']:
-                output.append(f"**Authors:** {paper['authors']}  \n")
-            if paper['affiliation']:
-                output.append(f"**Affiliation:** {paper['affiliation']}  \n")
-            if paper['country']:
-                output.append(f"**Country:** {paper['country']}  \n")
-            if paper['rating']:
-                output.append(f"**Rating:** {paper['rating']}  \n")
-            if paper['presentation']:
-                output.append(f"**Presentation:** {paper['presentation']}  \n")
-            if paper['track']:
-                output.append(f"**Track:** {paper['track']}  \n")
+        paper_num = 1
+        for conf_year in sorted(conf_groups.keys()):
+            conf_paper_list = conf_groups[conf_year]
+            # Sort by priority (descending) then by match_count (descending)
+            conf_paper_list.sort(key=lambda p: (get_priority_score(p), p['match_count']), reverse=True)
 
-            output.append(f"**Keywords Matched:** {', '.join(paper['matched_keywords'])}  \n")
-            output.append(f"**Match Count:** {paper['match_count']}  \n\n")
+            count = len(conf_paper_list)
+            output.append(f"### {conf_year} ({count} papers)\n\n")
 
-            # Why this paper
-            output.append("**Why this paper:**\n")
-            reasons = []
-            if paper['match_count'] >= 2:
-                reasons.append(f"Matches {paper['match_count']} keywords")
-            if paper.get('rating') and 'Top' in paper.get('rating', ''):
-                reasons.append(f"High rating: {paper['rating']}")
-            if paper['year'] >= 2024:
-                reasons.append(f"Recent ({paper['year']})")
+            for paper in conf_paper_list:
+                # Calculate priority for display
+                priority = "[LOW]"
+                if paper['match_count'] >= 3 or (paper.get('rating') and 'Top-5' in paper.get('rating', '')):
+                    priority = "[HIGH]"
+                elif paper['match_count'] >= 2 or (paper.get('rating') and 'Top' in paper.get('rating', '')):
+                    priority = "[MED]"
 
-            for reason in reasons:
-                output.append(f"- {reason}\n")
-            output.append("\n")
+                output.append(f"#### {paper_num}. {priority} {paper['title']}\n\n")
 
-            # Source
-            source_file = Path(paper['source_file']).name
-            output.append(f"**Original Source:** {paper['conference']}/{source_file}\n\n")
-            output.append("---\n\n")
+                if paper['authors']:
+                    output.append(f"**Authors:** {paper['authors']}  \n")
+                if paper['affiliation']:
+                    output.append(f"**Affiliation:** {paper['affiliation']}  \n")
+                if paper['country']:
+                    output.append(f"**Country:** {paper['country']}  \n")
+                if paper['rating']:
+                    output.append(f"**Rating:** {paper['rating']}  \n")
+                if paper['presentation']:
+                    output.append(f"**Presentation:** {paper['presentation']}  \n")
+                if paper['track']:
+                    output.append(f"**Track:** {paper['track']}  \n")
 
-            paper_num += 1
+                output.append(f"**Keywords Matched:** {', '.join(paper['matched_keywords'])}  \n")
+                output.append(f"**Match Count:** {paper['match_count']}  \n\n")
+
+                # Why this paper
+                output.append("**Why this paper:**\n")
+                reasons = []
+                if paper['match_count'] >= 2:
+                    reasons.append(f"Matches {paper['match_count']} keywords")
+                if paper.get('rating') and 'Top' in paper.get('rating', ''):
+                    reasons.append(f"High rating: {paper['rating']}")
+                if paper['year'] >= 2024:
+                    reasons.append(f"Recent ({paper['year']})")
+
+                for reason in reasons:
+                    output.append(f"- {reason}\n")
+                output.append("\n")
+
+                # Source and Links
+                source_file = Path(paper['source_file']).name
+                output.append(f"**Original Source:** {paper['conference']}/{source_file}\n\n")
+
+                # arXiv search link
+                search_query = urllib.parse.quote(paper['title'])
+                output.append(f"**Links:**\n")
+                output.append(f"- [Search on arXiv](https://arxiv.org/search/?query={search_query}&searchtype=title)\n")
+                output.append(f"- [Search on Google Scholar](https://scholar.google.com/scholar?q={search_query})\n\n")
+
+                output.append("---\n\n")
+
+                paper_num += 1
 
         # Write to file
         with open(os.path.join(output_dir, 'papers.md'), 'w', encoding='utf-8') as f:
@@ -281,11 +313,14 @@ class PaperFilter:
         output.append("## How to use\n")
         output.append("- [ ] Check papers as you read them\n")
         output.append("- Update notes in the \"Notes\" column\n")
-        output.append("- Mark priority: [HIGH] Must Read, [MED] Should Read, [LOW] Reference\n\n")
+        output.append("- Priority levels:\n")
+        output.append("  - **[HIGH]**: 3+ keyword matches OR Top-5% rated papers\n")
+        output.append("  - **[MED]**: 2+ keyword matches OR Top-rated papers\n")
+        output.append("  - **[LOW]**: 1 keyword match\n\n")
         output.append("---\n\n")
 
-        output.append("| Status | Priority | Paper | Conference | Notes |\n")
-        output.append("|--------|----------|-------|------------|-------|\n")
+        output.append("| Status | Priority | Paper | Conference | Keywords | Notes |\n")
+        output.append("|--------|----------|-------|------------|----------|-------|\n")
 
         for paper in papers:
             # Auto-assign priority based on criteria
@@ -296,14 +331,106 @@ class PaperFilter:
                 priority = "[MED]"
 
             conf_year = f"{paper['conference']} {paper['year']}"
-            title = paper['title'][:60] + '...' if len(paper['title']) > 60 else paper['title']
+            title = paper['title'][:50] + '...' if len(paper['title']) > 50 else paper['title']
+            keywords = f"{paper['match_count']}x"
 
-            output.append(f"| [ ] | {priority} | {title} | {conf_year} | |\n")
+            output.append(f"| [ ] | {priority} | {title} | {conf_year} | {keywords} | |\n")
 
         output.append(f"\n**Progress:** 0 / {len(papers)} papers read\n")
+        output.append(f"\n**Priority Distribution:**\n")
+        high = sum(1 for p in papers if p['match_count'] >= 3 or (p.get('rating') and 'Top-5' in p.get('rating', '')))
+        med = sum(1 for p in papers if (p['match_count'] >= 2 or (p.get('rating') and 'Top' in p.get('rating', ''))) and p['match_count'] < 3)
+        low = len(papers) - high - med
+        output.append(f"- [HIGH]: {high} papers\n")
+        output.append(f"- [MED]: {med} papers\n")
+        output.append(f"- [LOW]: {low} papers\n")
 
         with open(os.path.join(output_dir, 'reading_checklist.md'), 'w', encoding='utf-8') as f:
             f.write(''.join(output))
+
+    def generate_by_conference_files(self, papers: List[Dict], stats: Dict, output_dir: str):
+        """Generate individual files for each conference/year combination"""
+        by_conf_dir = os.path.join(output_dir, 'by_conference')
+        os.makedirs(by_conf_dir, exist_ok=True)
+
+        # Group papers by conference/year
+        conf_papers = {}
+        for paper in papers:
+            conf_year = f"{paper['conference']}_{paper['year']}"
+            if conf_year not in conf_papers:
+                conf_papers[conf_year] = []
+            conf_papers[conf_year].append(paper)
+
+        # Sort papers within each conference by priority (HIGH > MED > LOW)
+        def get_priority_score(paper):
+            if paper['match_count'] >= 3 or (paper.get('rating') and 'Top-5' in paper.get('rating', '')):
+                return 3  # HIGH
+            elif paper['match_count'] >= 2 or (paper.get('rating') and 'Top' in paper.get('rating', '')):
+                return 2  # MED
+            else:
+                return 1  # LOW
+
+        # Generate a file for each conference/year
+        for conf_year, conf_paper_list in conf_papers.items():
+            # Sort by priority (descending) then by match_count (descending)
+            conf_paper_list.sort(key=lambda p: (get_priority_score(p), p['match_count']), reverse=True)
+
+            output = []
+            conf, year = conf_year.rsplit('_', 1)
+
+            # Count papers by priority
+            high_count = sum(1 for p in conf_paper_list if get_priority_score(p) == 3)
+            med_count = sum(1 for p in conf_paper_list if get_priority_score(p) == 2)
+            low_count = sum(1 for p in conf_paper_list if get_priority_score(p) == 1)
+
+            output.append(f"# {conf} {year}\n")
+            output.append(f"**Total Papers:** {len(conf_paper_list)}\n\n")
+            output.append(f"**Priority Distribution:**\n")
+            output.append(f"- [HIGH]: {high_count} papers\n")
+            output.append(f"- [MED]: {med_count} papers\n")
+            output.append(f"- [LOW]: {low_count} papers\n\n")
+            output.append("_Papers are sorted by priority (HIGH → MED → LOW)_\n\n")
+            output.append("---\n\n")
+
+            for idx, paper in enumerate(conf_paper_list, 1):
+                # Priority indicator
+                priority = "[LOW]"
+                if paper['match_count'] >= 3 or (paper.get('rating') and 'Top-5' in paper.get('rating', '')):
+                    priority = "[HIGH]"
+                elif paper['match_count'] >= 2 or (paper.get('rating') and 'Top' in paper.get('rating', '')):
+                    priority = "[MED]"
+
+                output.append(f"## {idx}. {priority} {paper['title']}\n\n")
+
+                if paper['authors']:
+                    output.append(f"**Authors:** {paper['authors']}  \n")
+                if paper['affiliation']:
+                    output.append(f"**Affiliation:** {paper['affiliation']}  \n")
+                if paper['country']:
+                    output.append(f"**Country:** {paper['country']}  \n")
+                if paper['rating']:
+                    output.append(f"**Rating:** {paper['rating']}  \n")
+                if paper['presentation']:
+                    output.append(f"**Presentation:** {paper['presentation']}  \n")
+                if paper['track']:
+                    output.append(f"**Track:** {paper['track']}  \n")
+
+                output.append(f"**Keywords Matched:** {', '.join(paper['matched_keywords'])}  \n")
+                output.append(f"**Match Count:** {paper['match_count']}  \n")
+                output.append(f"**Priority:** {priority}\n\n")
+
+                # arXiv and Google Scholar search links
+                search_query = urllib.parse.quote(paper['title'])
+                output.append(f"**Links:**\n")
+                output.append(f"- [Search on arXiv](https://arxiv.org/search/?query={search_query}&searchtype=title)\n")
+                output.append(f"- [Search on Google Scholar](https://scholar.google.com/scholar?q={search_query})\n\n")
+
+                output.append("---\n\n")
+
+            # Write file
+            filename = f"{conf_year}.md"
+            with open(os.path.join(by_conf_dir, filename), 'w', encoding='utf-8') as f:
+                f.write(''.join(output))
 
     def generate_metadata_json(self, topic_key: str, topic_config: Dict, stats: Dict, output_dir: str, timestamp: str):
         """Generate metadata JSON file"""
@@ -316,7 +443,12 @@ class PaperFilter:
                 'conferences': topic_config.get('conferences', []),
                 'years': topic_config.get('years')
             },
-            'results': stats
+            'results': stats,
+            'priority_criteria': {
+                'HIGH': '3+ keyword matches OR Top-5% rated papers',
+                'MED': '2+ keyword matches OR Top-rated papers',
+                'LOW': '1 keyword match'
+            }
         }
 
         with open(os.path.join(output_dir, 'metadata.json'), 'w', encoding='utf-8') as f:
@@ -389,7 +521,10 @@ class PaperFilter:
         # Generate output files
         print(f"\nGenerating output files...")
         self.generate_papers_md(topic_key, topic_config, papers, stats, output_dir)
-        print(f"  [OK] papers.md")
+        print(f"  [OK] papers.md - All papers in one file")
+
+        self.generate_by_conference_files(papers, stats, output_dir)
+        print(f"  [OK] by_conference/ - Individual files per conference/year")
 
         self.generate_checklist_md(topic_key, topic_config, papers, output_dir)
         print(f"  [OK] reading_checklist.md")

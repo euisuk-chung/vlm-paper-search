@@ -5,7 +5,7 @@
 filter_config.yaml
 
 # Filtered results - local study materials
-/filtered/
+/_filtered/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

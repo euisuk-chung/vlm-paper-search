@@ -128,7 +128,7 @@ The repository includes an intelligent filtering system to help you find relevan
    ```
 
 3. **Review results**:
-   - Results are saved in `filtered/{timestamp}_{topic_name}/`
+   - Results are saved in `_filtered/{timestamp}_{topic_name}/`
    - Each run creates a new timestamped folder so you can compare different searches
    - Files generated:
      - `papers.md` - Full paper list organized by conference
@@ -170,7 +170,7 @@ topics:
 #### Output Structure
 
 ```
-filtered/
+_filtered/
 ├── 2025-11-22_10-30-15_vlm_pruning/    # Timestamped results
 │   ├── papers.md                        # Reading material
 │   ├── reading_checklist.md             # Progress tracker
