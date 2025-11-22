@@ -1,0 +1,68 @@
+# Paper Filtering Configuration Example
+# Copy this file to filter_config.yaml and customize it for your research interests
+
+topics:
+  gnn:
+    name: "Graph Neural Networks"
+    description: "Research on graph neural networks and graph representation learning"
+    keywords:
+      - GNN
+      - Graph Neural Network
+      - Graph Convolution
+      - Graph Attention
+      - Node Classification
+      - Link Prediction
+      - Graph Representation
+      - Message Passing
+    conferences:
+      - ICLR
+      - NeurIPS
+      - ICML
+    years:
+      - 2024
+      - 2025
+
+  rl:
+    name: "Reinforcement Learning"
+    description: "Deep reinforcement learning and policy optimization"
+    keywords:
+      - Reinforcement Learning
+      - Policy Gradient
+      - Q-Learning
+      - Actor-Critic
+      - RLHF
+      - Multi-Agent
+      - PPO
+      - DQN
+    conferences:
+      - NeurIPS
+      - ICML
+      - ICLR
+    years: null  # null means search all available years
+
+  nlp:
+    name: "Natural Language Generation"
+    description: "Text generation, summarization, and dialogue systems"
+    keywords:
+      - Text Generation
+      - Summarization
+      - Dialogue
+      - Chatbot
+      - Machine Translation
+      - Seq2Seq
+      - Transformer
+      - GPT
+    conferences:
+      - ACL
+      - EMNLP
+      - NAACL
+      - AAAI
+    years:
+      - 2024
+      - 2025
+
+# Global options
+options:
+  case_sensitive: false
+  min_keyword_matches: 1  # Minimum number of keyword matches required
+  output_dir: "filtered"
