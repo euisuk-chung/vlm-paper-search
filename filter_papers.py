@@ -348,6 +348,75 @@ class PaperFilter:
         with open(os.path.join(output_dir, 'reading_checklist.md'), 'w', encoding='utf-8') as f:
             f.write(''.join(output))
 
+    def generate_excel_file(self, papers: List[Dict], output_dir: str):
+        """Generate Excel file with papers organized in a table"""
+        try:
+            import pandas as pd
+        except ImportError:
+            print("  [SKIP] Excel file - pandas not installed (run: uv pip install pandas openpyxl)")
+            return
+
+        # Prepare data for DataFrame
+        data = []
+        for paper in papers:
+            # Calculate priority
+            priority = "LOW"
+            if paper['match_count'] >= 3 or (paper.get('rating') and 'Top-5' in paper.get('rating', '')):
+                priority = "HIGH"
+            elif paper['match_count'] >= 2 or (paper.get('rating') and 'Top' in paper.get('rating', '')):
+                priority = "MED"
+
+            # Create arXiv and Google Scholar URLs
+            search_query = urllib.parse.quote(paper['title'])
+            arxiv_url = f"https://arxiv.org/search/?query={search_query}&searchtype=title"
+            scholar_url = f"https://scholar.google.com/scholar?q={search_query}"
+
+            data.append({
+                'Conference': paper['conference'],
+                'Year': paper['year'],
+                'Priority': priority,
+                'Title': paper['title'],
+                'Authors': paper.get('authors', ''),
+                'Keywords Matched': ', '.join(paper['matched_keywords']),
+                'Match Count': paper['match_count'],
+                'Rating': paper.get('rating', ''),
+                'arXiv Search': arxiv_url,
+                'Google Scholar': scholar_url
+            })
+
+        # Create DataFrame
+        df = pd.DataFrame(data)
+
+        # Sort by Conference, Year, then Priority (HIGH > MED > LOW)
+        priority_order = {'HIGH': 3, 'MED': 2, 'LOW': 1}
+        df['Priority_Num'] = df['Priority'].map(priority_order)
+        df = df.sort_values(['Conference', 'Year', 'Priority_Num', 'Match Count'],
+                           ascending=[True, True, False, False])
+        df = df.drop('Priority_Num', axis=1)
+
+        # Write to Excel
+        excel_path = os.path.join(output_dir, 'papers.xlsx')
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='All Papers', index=False)
+
+            # Auto-adjust column widths
+            worksheet = writer.sheets['All Papers']
+            for idx, col in enumerate(df.columns):
+                max_length = max(
+                    df[col].astype(str).apply(len).max(),
+                    len(col)
+                )
+                # Limit URL columns width
+                if 'URL' in col or 'Search' in col or 'Scholar' in col or 'arXiv' in col:
+                    max_length = min(max_length, 50)
+                # Limit Title column width
+                elif col == 'Title':
+                    max_length = min(max_length, 80)
+                else:
+                    max_length = min(max_length, 40)
+
+                worksheet.column_dimensions[chr(65 + idx)].width = max_length + 2
+
     def generate_by_conference_files(self, papers: List[Dict], stats: Dict, output_dir: str):
         """Generate individual files for each conference/year combination"""
         by_conf_dir = os.path.join(output_dir, 'by_conference')
@@ -528,6 +597,9 @@ class PaperFilter:
 
         self.generate_checklist_md(topic_key, topic_config, papers, output_dir)
         print(f"  [OK] reading_checklist.md")
+
+        self.generate_excel_file(papers, output_dir)
+        print(f"  [OK] papers.xlsx - Excel file with all papers")
 
         self.generate_metadata_json(topic_key, topic_config, stats, output_dir, timestamp)
         print(f"  [OK] metadata.json")
